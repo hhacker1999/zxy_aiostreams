@@ -68,10 +68,21 @@ export const zxyConfigMiddleware = async (
     }
 
 
-    if (!req.body || Object.keys(req.body).length === 0) {
+    if (!req.body || Object.keys(req.body).length === 0 || !req.body.services) {
       next(new APIError(constants.ErrorCode.INVALID_SERVICES));
       return;
     }
+
+
+    const disabled = req.body.disabled
+    if (Array.isArray(disabled)) {
+      userData.presets.forEach((preset, _) => {
+        if (disabled.includes(preset.type)) {
+          preset.enabled = false
+        }
+      })
+    }
+
 
     userData.encryptedPassword = encrypedPassword;
     userData.uuid = userId;
