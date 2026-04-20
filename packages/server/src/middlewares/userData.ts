@@ -10,6 +10,7 @@ import {
   UserRepository,
   Env,
 } from '@aiostreams/core';
+import { syncUserDataUrls } from '../utils/syncUserData.js';
 
 const logger = createLogger('server');
 
@@ -22,8 +23,15 @@ const VALID_RESOURCES = [
   'streams',
 ];
 
+interface UserDataParams {
+  uuid?: string;
+  encryptedPassword?: string;
+  // match Express.Request<ParamsDictionary> to keep middleware flexible
+  [key: string]: string | string[] | undefined;
+}
+
 export const userDataMiddleware = async (
-  req: Request,
+  req: Request<UserDataParams>,
   res: Response,
   next: NextFunction
 ) => {
@@ -81,7 +89,7 @@ export const userDataMiddleware = async (
 
     // decrypt the encrypted password
     const { success: successfulDecryption, data: decryptedPassword } =
-      decryptString(encryptedPassword!);
+      decryptString(encryptedPassword);
     if (!successfulDecryption) {
       if (constants.RESOURCES.includes(resource as Resource)) {
         res.status(200).json(
@@ -116,6 +124,8 @@ export const userDataMiddleware = async (
     userData.ip = req.userIp;
 
     if (resource !== 'configure') {
+      userData = await syncUserDataUrls(userData);
+
       try {
         userData = await validateConfig(userData, {
           skipErrorsFromAddonsOrProxies: true,

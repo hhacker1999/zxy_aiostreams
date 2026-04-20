@@ -1,16 +1,8 @@
-import {
-  createLogger,
-  maskSensitiveInfo,
-  formatDurationAsText,
-} from './logger.js';
+import { createLogger, maskSensitiveInfo } from './logger.js';
+import { formatDurationAsText, formatMilliseconds } from './time.js';
 import { Env } from './env.js';
 
 const logger = createLogger('startup');
-
-const formatMilliseconds = (ms: number): string => {
-  if (ms < 1000) return `${ms}ms`;
-  return formatDurationAsText(ms / 1000);
-};
 
 const parseBlockedItems = (
   envVar: string | undefined
@@ -82,6 +74,30 @@ const logCacheTtl = (cacheName: string, ttlMap: Record<string, number>) => {
       const overrideStatus =
         value === -1 ? '❌ DISABLED' : formatDurationAsText(value);
       logKeyValue(`${key}:`, overrideStatus, indent);
+    });
+  }
+};
+
+/**
+ * Helper function to log a serviceId:time map (e.g., poll intervals, wait times)
+ */
+const logServiceTimeMap = (
+  mapName: string,
+  timeMap: Record<string, number>
+) => {
+  const indent = '        ';
+  const wildcardTime = timeMap['*'];
+  const overrides = Object.entries(timeMap).filter(([key]) => key !== '*');
+
+  logKeyValue(`${mapName}:`, '');
+
+  if (wildcardTime !== undefined) {
+    logKeyValue('Default (*):', formatMilliseconds(wildcardTime), indent);
+  }
+
+  if (overrides.length > 0) {
+    overrides.forEach(([key, value]) => {
+      logKeyValue(`${key}:`, formatMilliseconds(value), indent);
     });
   }
 };
@@ -203,12 +219,12 @@ const logStartupInfo = () => {
       );
     }
 
-    if (Env.RPDB_API_KEY_VALIDITY_CACHE_TTL === -1) {
-      logKeyValue('RPDB API Cache:', '❌ DISABLED');
+    if (Env.POSTER_API_KEY_VALIDITY_CACHE_TTL === -1) {
+      logKeyValue('Poster API Cache:', '❌ DISABLED');
     } else {
       logKeyValue(
-        'RPDB API TTL:',
-        formatDurationAsText(Env.RPDB_API_KEY_VALIDITY_CACHE_TTL)
+        'Poster API TTL:',
+        formatDurationAsText(Env.POSTER_API_KEY_VALIDITY_CACHE_TTL)
       );
     }
   });
@@ -308,8 +324,12 @@ const logStartupInfo = () => {
     logKeyValue('Max Groups:', Env.MAX_GROUPS.toString());
     logKeyValue('Max Keyword Filters:', Env.MAX_KEYWORD_FILTERS.toString());
     logKeyValue(
-      'Max Stream Expression Filters:',
-      Env.MAX_STREAM_EXPRESSION_FILTERS.toString()
+      'Max Stream Expressions:',
+      Env.MAX_STREAM_EXPRESSIONS.toString()
+    );
+    logKeyValue(
+      'Max Stream Expressions Characters:',
+      Env.MAX_STREAM_EXPRESSIONS_TOTAL_CHARACTERS.toString()
     );
     logKeyValue(
       'Timeout Range:',
@@ -336,11 +356,13 @@ const logStartupInfo = () => {
   const blockedHosts = parseBlockedItems(Env.DISABLED_HOSTS);
   const blockedAddons = parseBlockedItems(Env.DISABLED_ADDONS);
   const blockedServices = parseBlockedItems(Env.DISABLED_SERVICES);
+  const disabledStreamTypes = Env.DISABLED_STREAM_TYPES ?? [];
 
   if (
     blockedHosts.length > 0 ||
     blockedAddons.length > 0 ||
-    blockedServices.length > 0
+    blockedServices.length > 0 ||
+    disabledStreamTypes.length > 0
   ) {
     logSection('BLOCKED ITEMS', '🚫', () => {
       if (blockedHosts.length > 0) {
@@ -368,6 +390,12 @@ const logStartupInfo = () => {
         });
       } else {
         logKeyValue('Blocked Services:', '❌ None');
+      }
+
+      if (disabledStreamTypes.length > 0) {
+        logKeyValue('Disabled Stream Types:', disabledStreamTypes.join(', '));
+      } else {
+        logKeyValue('Disabled Stream Types:', '❌ None');
       }
     });
   }
@@ -700,6 +728,45 @@ const logStartupInfo = () => {
         logKeyValue('    User Agent:', Env.BUILTIN_GDRIVE_USER_AGENT, '     ');
       }
     }
+
+    // Title language scraping config
+    logKeyValue('Title Scraping:', '');
+    const titleLangs = Env.BUILTIN_SCRAPE_TITLE_LANGUAGES as
+      | Record<string, string[]>
+      | undefined;
+    if (titleLangs) {
+      const entries = Object.entries(titleLangs);
+      entries.forEach(([domain, specs]) => {
+        logKeyValue(
+          `  ${domain === '*' ? '*(default):' : `${domain}:`}`,
+          specs.join(', '),
+          '       '
+        );
+      });
+    } else {
+      const legacyAllTitles = Env.BUILTIN_SCRAPE_WITH_ALL_TITLES;
+      const legacyValue = Array.isArray(legacyAllTitles)
+        ? `all titles for: ${legacyAllTitles.join(', ')}`
+        : legacyAllTitles
+          ? 'all titles (global)'
+          : 'primary title only (default)';
+      logKeyValue('  Mode (legacy):', legacyValue, '       ');
+    }
+    logKeyValue(
+      '  Title Limit:',
+      Env.BUILTIN_SCRAPE_TITLE_LIMIT.toString(),
+      '       '
+    );
+
+    // Download timing
+    logServiceTimeMap(
+      'Download Poll Interval',
+      Env.BUILTIN_DOWNLOAD_POLL_INTERVAL
+    );
+    logServiceTimeMap(
+      'Download Max Wait Time',
+      Env.BUILTIN_DOWNLOAD_MAX_WAIT_TIME
+    );
   });
 
   // Addon Sources
@@ -1068,6 +1135,28 @@ const logStartupInfo = () => {
       );
     }
 
+    logKeyValue('Baguettio:', Env.BAGUETTIO_URL);
+    if (Env.DEFAULT_BAGUETTIO_TIMEOUT) {
+      logKeyValue(
+        '  Timeout:',
+        formatMilliseconds(Env.DEFAULT_BAGUETTIO_TIMEOUT),
+        '     '
+      );
+    }
+
+    // HdHub
+    logKeyValue('HdHub:', Env.HDHUB_URL);
+    if (Env.DEFAULT_HDHUB_TIMEOUT) {
+      logKeyValue(
+        '  Timeout:',
+        formatMilliseconds(Env.DEFAULT_HDHUB_TIMEOUT),
+        '     '
+      );
+    }
+    if (Env.DEFAULT_HDHUB_USER_AGENT) {
+      logKeyValue('  User Agent:', Env.DEFAULT_HDHUB_USER_AGENT, '     ');
+    }
+
     // DMM Cast (Note: no URL env var, only timeout and user agent)
     if (Env.DEFAULT_DMM_CAST_TIMEOUT || Env.DEFAULT_DMM_CAST_USER_AGENT) {
       logKeyValue('DMM Cast:', 'Configuration only');
@@ -1403,6 +1492,19 @@ const logStartupInfo = () => {
   }
   if (Env.DEFAULT_AI_SEARCH_USER_AGENT) {
     logKeyValue('  User Agent:', Env.DEFAULT_AI_SEARCH_USER_AGENT, '     ');
+  }
+
+  // Flix-Streams
+  logKeyValue('Flix-Streams:', Env.FLIX_STREAMS_URL);
+  if (Env.DEFAULT_FLIX_STREAMS_TIMEOUT) {
+    logKeyValue(
+      '  Timeout:',
+      formatMilliseconds(Env.DEFAULT_FLIX_STREAMS_TIMEOUT),
+      '     '
+    );
+  }
+  if (Env.DEFAULT_FLIX_STREAMS_USER_AGENT) {
+    logKeyValue('  User Agent:', Env.DEFAULT_FLIX_STREAMS_USER_AGENT, '     ');
   }
 
   // FKStream

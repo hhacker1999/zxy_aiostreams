@@ -1,6 +1,7 @@
 export * from './utils/index.js';
 export * from './db/index.js';
-export * from './main.js';
+export * from './main/types.js';
+export * from './main/index.js';
 export * from './parser/index.js';
 export * from './formatters/index.js';
 export * from './transformers/index.js';
@@ -11,17 +12,27 @@ export {
   GDriveAddon,
   GoogleOAuth,
   GDriveAPI,
-  TorBoxSearchAddonError,
   TorznabAddon,
   NewznabAddon,
   ProwlarrAddon,
   KnabenAddon,
+  EztvAddon,
   TorrentGalaxyAddon,
   SeaDexAddon,
   EasynewsSearchAddon,
   EasynewsAuthSchema,
   EasynewsNzbParamsSchema,
   EasynewsApi,
-  EasynewsNzbParams,
+  type EasynewsNzbParams,
+  SeaDexDataset,
+  LibraryAddon,
+  preWarmLibraryCaches,
+  refreshLibraryCacheForService,
 } from './builtins/index.js';
 export { PresetManager } from './presets/index.js';
+export {
+  populateNzbFallbacks,
+  getNzbFallbacks,
+  isNzbRetryableError,
+} from './main/nzbFailover.js';
+export type { NzbFallback } from './main/nzbFailover.js';

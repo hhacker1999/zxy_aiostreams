@@ -2,8 +2,14 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { TextInput } from '@/components/ui/text-input';
-import { applyMigrations, useUserData, DefaultUserData } from '@/context/userData';
-import { UserConfigAPI } from '@/services/api';
+import { applyMigrations, useUserData } from '@/context/userData';
+import {
+  createUserConfig,
+  deleteUserConfig,
+  changePassword,
+  CreateUserResponse,
+  APIError,
+} from '@/lib/api';
 import { PageWrapper } from '@/components/shared/page-wrapper';
 import { Alert } from '@/components/ui/alert';
 import { SettingsCard } from '../shared/settings-card';
@@ -16,15 +22,8 @@ import { PageControls } from '../shared/page-controls';
 import { useDisclosure } from '@/hooks/disclosure';
 import { Modal } from '../ui/modal';
 import { Switch } from '../ui/switch';
-import { TemplateExportModal } from '../shared/template-export-modal';
-import { ConfigTemplatesModal } from '../shared/config-templates-modal';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '../ui/accordion';
-import { Select } from '@/components/ui/select';
+import { TemplateExportModal } from '../shared/templates/export-modal';
+import { ConfigTemplatesModal } from '../shared/templates';
 import { PasswordInput } from '../ui/password-input';
 import { useMenu } from '@/context/menu';
 import {
@@ -32,8 +31,9 @@ import {
   useConfirmationDialog,
 } from '../shared/confirmation-dialog';
 import { UserData } from '@aiostreams/core';
-import { DiffViewer } from '../shared/diff-viewer';
-import { getObjectDiff, DiffItem, sortKeys } from '@/utils/diff';
+import { useSave } from '@/context/save';
+import { AddonPasswordModal } from '@/components/shared/addon-password-modal';
+import { FiExternalLink } from 'react-icons/fi';
 
 // Reusable modal option button component
 interface ModalOptionButtonProps {
@@ -52,7 +52,7 @@ function ModalOptionButton({
   return (
     <button
       onClick={onClick}
-      className="group relative flex flex-col items-center gap-4 rounded-xl border-2 border-gray-700 bg-gradient-to-br from-gray-800/50 to-gray-800/30 p-6 text-center transition-all hover:border-brand-400 hover:from-brand-400/10 hover:to-brand-400/5 hover:shadow-lg hover:shadow-brand-400/20 hover:ring-1 hover:ring-brand-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-400"
+      className="group relative flex flex-col items-center gap-4 rounded-xl border-2 border-gray-700 bg-gradient-to-br from-gray-800/50 to-gray-800/30 p-6 text-center transition-all hover:border-brand-400 hover:from-brand-400/10 hover:to-brand-400/5 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-400"
     >
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-lg transition-transform group-hover:scale-110">
         {icon}
@@ -64,6 +64,498 @@ function ModalOptionButton({
         </p>
       </div>
     </button>
+  );
+}
+
+interface AppCardProps {
+  logoSrc: string;
+  name: string;
+  description: string;
+  onClick: () => void;
+  unofficial?: boolean;
+  beta?: boolean;
+  author?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+function AppCard({
+  logoSrc,
+  name,
+  description,
+  onClick,
+  unofficial,
+  beta,
+  author,
+  disabled,
+  disabledReason,
+}: AppCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`group relative flex items-center gap-3 rounded-xl border-2 border-gray-700 bg-gradient-to-br from-gray-800/50 to-gray-800/30 p-3 text-left transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 ${
+        disabled
+          ? 'cursor-not-allowed opacity-60'
+          : 'hover:border-brand-400 hover:from-brand-400/10 hover:to-brand-400/5'
+      }`}
+    >
+      <div className="flex-shrink-0 h-8 w-8 rounded-lg overflow-hidden flex items-center justify-center">
+        <img
+          src={logoSrc}
+          alt={name}
+          className="h-full w-full object-contain"
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-sm font-medium text-white">{name}</span>
+          {beta && (
+            <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+              Beta
+            </span>
+          )}
+          {unofficial && (
+            <span className="rounded-full border border-gray-600 bg-gray-800/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-300">
+              Unofficial
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-gray-400 mt-0.5">{description}</p>
+        {author && (
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Integration author: {author}
+          </p>
+        )}
+        {disabledReason && (
+          <p className="text-[11px] text-amber-300 mt-1">{disabledReason}</p>
+        )}
+      </div>
+    </button>
+  );
+}
+
+interface CreateConfigCardProps {
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  passwordRequirements: string[];
+  newPassword: string;
+  confirmNewPassword: string;
+  onNewPasswordChange: (value: string) => void;
+  onConfirmNewPasswordChange: (value: string) => void;
+  createLoading: boolean;
+}
+
+function CreateConfigCard({
+  onSubmit,
+  passwordRequirements,
+  newPassword,
+  confirmNewPassword,
+  onNewPasswordChange,
+  onConfirmNewPasswordChange,
+  createLoading,
+}: CreateConfigCardProps) {
+  return (
+    <SettingsCard
+      title="Create Configuration"
+      description="Set up your personalised addon configuration"
+    >
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div>
+          {passwordRequirements.length > 0 && newPassword?.length > 0 && (
+            <Alert
+              intent="alert"
+              title="Password Requirements"
+              description={
+                <ul className="list-disc list-inside">
+                  {passwordRequirements.map((requirement) => (
+                    <li key={requirement}>{requirement}</li>
+                  ))}
+                </ul>
+              }
+            />
+          )}
+          <PasswordInput
+            label="Password"
+            id="password"
+            value={newPassword}
+            onValueChange={onNewPasswordChange}
+            placeholder="Enter a password to protect your configuration"
+            required
+            autoComplete="new-password"
+          />
+          <div className="pt-2">
+            <PasswordInput
+              label="Confirm Password"
+              id="confirm-password"
+              value={confirmNewPassword}
+              onValueChange={onConfirmNewPasswordChange}
+              placeholder="Re-enter your password"
+              required
+              autoComplete="new-password"
+            />
+          </div>
+          <p className="text-sm text-[--muted] mt-1">
+            This is the password you will use to access and update your
+            configuration later. You can change your password later using the
+            Change Password option, but please remember your current password as
+            it is required to make changes.
+          </p>
+        </div>
+        <Button intent="white" type="submit" loading={createLoading} rounded>
+          Create
+        </Button>
+      </form>
+    </SettingsCard>
+  );
+}
+
+interface SaveConfigCardProps {
+  uuid: string;
+  onCopyUuid: () => void;
+  onSave: (e: React.FormEvent<HTMLFormElement>) => void;
+  saveLoading: boolean;
+  showChanges: boolean;
+  onShowChangesChange: (value: boolean) => void;
+}
+
+function SaveConfigCard({
+  uuid,
+  onCopyUuid,
+  onSave,
+  saveLoading,
+  showChanges,
+  onShowChangesChange,
+}: SaveConfigCardProps) {
+  return (
+    <SettingsCard
+      title="Save Configuration"
+      description="Save your configuration to your account by clicking Save below."
+    >
+      <div className="flex items-start gap-1">
+        <Alert
+          intent="info"
+          isClosable={false}
+          description={
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-md text-[--primary]">
+                  Your UUID: <span className="font-bold">{uuid}</span>
+                </span>
+                <BiCopy
+                  className="min-h-5 min-w-5 cursor-pointer"
+                  onClick={onCopyUuid}
+                />
+              </div>
+              <p className="text-sm text-[--muted]">
+                Save your UUID and password - you'll need them to update your
+                configuration later
+              </p>
+            </div>
+          }
+          className="flex-1"
+        />
+      </div>
+      <form onSubmit={onSave}>
+        <div className="flex items-center justify-between gap-4 mt-4">
+          <Button type="submit" intent="white" loading={saveLoading} rounded>
+            Save
+          </Button>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="show-changes"
+              label="Show changes before saving"
+              value={showChanges}
+              onValueChange={onShowChangesChange}
+            />
+          </div>
+        </div>
+      </form>
+    </SettingsCard>
+  );
+}
+
+interface InstallCardProps {
+  baseUrl: string;
+  uuid: string;
+  encryptedPassword: string;
+  encodedManifest: string;
+  manifestUrl: string;
+  onCopyManifestUrl: () => void;
+  onOpenChillio: () => void;
+  onOpenSeanime: () => void;
+  onOpenJellyfin: () => void;
+  onOpenAniyomi: () => void;
+  disableSeanimeCard?: boolean;
+  seanimeDisabledReason?: string;
+}
+
+function InstallCard({
+  baseUrl,
+  uuid,
+  encryptedPassword,
+  encodedManifest,
+  manifestUrl,
+  onCopyManifestUrl,
+  onOpenChillio,
+  onOpenSeanime,
+  onOpenJellyfin,
+  onOpenAniyomi,
+  disableSeanimeCard,
+  seanimeDisabledReason,
+}: InstallCardProps) {
+  const stremioCardRef = React.useRef<HTMLDivElement>(null);
+  const [stremioCardHeight, setStremioCardHeight] = React.useState<
+    number | null
+  >(null);
+  const [isDesktop, setIsDesktop] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const updateViewport = () => setIsDesktop(mediaQuery.matches);
+    updateViewport();
+
+    mediaQuery.addEventListener('change', updateViewport);
+
+    return () => {
+      mediaQuery.removeEventListener('change', updateViewport);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!isDesktop) {
+      setStremioCardHeight(null);
+      return;
+    }
+
+    const element = stremioCardRef.current;
+    if (!element) return;
+
+    const updateHeight = () => {
+      setStremioCardHeight(element.getBoundingClientRect().height);
+    };
+
+    updateHeight();
+
+    const resizeObserver = new ResizeObserver(updateHeight);
+    resizeObserver.observe(element);
+
+    window.addEventListener('resize', updateHeight);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [isDesktop]);
+
+  return (
+    <SettingsCard
+      title="Installation Options"
+      description="Install your addon using your preferred method. If a reinstall is necessary, a pop-up will tell you — otherwise, you do not need to reinstall."
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:items-start">
+        <div
+          ref={stremioCardRef}
+          className="lg:col-span-7 xl:col-span-8 flex flex-col gap-5 rounded-xl border border-gray-700 bg-gray-800/30 p-5 shadow-inner"
+        >
+          <div className="flex items-center gap-4 border-b border-gray-700/50 pb-4">
+            <div className="flex-shrink-0 h-12 w-12 rounded-lg bg-gray-900 flex items-center justify-center p-2 shadow-sm">
+              <img
+                src="https://raw.githubusercontent.com/Stremio/stremio-brand/refs/heads/master/logos/PNG/stremio-logo-800px.png"
+                alt="Stremio"
+                className="h-full w-full object-contain"
+              />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Stremio</h3>
+              <p className="text-sm text-gray-400">
+                Install to Stremio or other Stremio addon compatible clients
+                using the Manifest URL.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Button
+              onClick={() =>
+                window.open(
+                  `stremio://${baseUrl.replace(/^https?:\/\//, '')}/stremio/${uuid}/${encryptedPassword}/manifest.json`
+                )
+              }
+              intent="primary"
+              className="w-full shadow-md"
+            >
+              Install to Stremio
+            </Button>
+            <Button
+              onClick={() =>
+                window.open(
+                  `https://web.stremio.com/#/addons?addon=${encodedManifest}`
+                )
+              }
+              intent="gray-outline"
+              className="w-full"
+            >
+              Install to Stremio Web
+            </Button>
+          </div>
+
+          <div className="space-y-1.5 mt-2">
+            <label className="text-xs font-medium text-gray-400 ml-1">
+              Direct Manifest URL
+            </label>
+            <div className="flex items-center gap-2">
+              <TextInput
+                type="text"
+                readOnly
+                value={manifestUrl}
+                className="flex-1 font-mono text-sm bg-black/20"
+                onClick={(e) => e.currentTarget.select()}
+              />
+              <Button
+                onClick={onCopyManifestUrl}
+                intent="primary"
+                className="shrink-0 px-3"
+                aria-label="Copy install link"
+              >
+                <CopyIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="lg:col-span-5 xl:col-span-4 flex flex-col rounded-xl border border-gray-700 bg-gray-800/10 p-5 lg:overflow-hidden"
+          style={
+            isDesktop && stremioCardHeight
+              ? { maxHeight: `${stremioCardHeight}px` }
+              : undefined
+          }
+        >
+          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <div className="h-px bg-gray-700 flex-1"></div>
+            Other apps
+            <div className="h-px bg-gray-700 flex-1"></div>
+          </h3>
+
+          <div className="flex flex-col gap-3 flex-1 min-h-0 lg:overflow-y-auto pr-1">
+            <AppCard
+              logoSrc="https://link.chillio.app/app-icon.png"
+              name="Chillio"
+              description="Via ChillLink protocol"
+              onClick={onOpenChillio}
+            />
+            <AppCard
+              logoSrc="https://seanime.app/seanime-logo.png"
+              name="Seanime"
+              description="Anime-focused client"
+              beta
+              onClick={onOpenSeanime}
+              disabled={disableSeanimeCard}
+              disabledReason={seanimeDisabledReason}
+            />
+            <AppCard
+              logoSrc="https://raw.githubusercontent.com/jellyfin/jellyfin-ux/refs/heads/master/logos/PNG-4x/jellyfin-icon--color-on-dark.png"
+              name="Jellyfin"
+              description="Via Gelato plugin"
+              unofficial
+              author="lostb1t"
+              onClick={onOpenJellyfin}
+            />
+            <AppCard
+              logoSrc="https://aniyomi.org/img/logo-128px.png"
+              name="Aniyomi / Animiru"
+              description="Extension-based integration"
+              unofficial
+              author="worldInColors"
+              onClick={onOpenAniyomi}
+            />
+          </div>
+        </div>
+      </div>
+    </SettingsCard>
+  );
+}
+
+interface BackupCardProps {
+  onExportOpen: () => void;
+  onImportOpen: () => void;
+  onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  importFileRef: React.RefObject<HTMLInputElement | null>;
+}
+
+function BackupCard({
+  onExportOpen,
+  onImportOpen,
+  onImport,
+  importFileRef,
+}: BackupCardProps) {
+  return (
+    <SettingsCard
+      title="Backups"
+      description="Export your settings or restore from a backup file"
+    >
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={onExportOpen} leftIcon={<UploadIcon />} intent="gray">
+          Export
+        </Button>
+        <input
+          type="file"
+          accept=".json"
+          className="hidden"
+          id="import-file"
+          onChange={onImport}
+          ref={importFileRef}
+        />
+        <Button
+          onClick={onImportOpen}
+          leftIcon={<DownloadIcon />}
+          intent="gray"
+        >
+          Import
+        </Button>
+      </div>
+    </SettingsCard>
+  );
+}
+
+interface DangerZoneCardProps {
+  hasUser: boolean;
+  onChangePasswordOpen: () => void;
+  onDeleteUserOpen: () => void;
+  onResetOpen: () => void;
+}
+
+function DangerZoneCard({
+  hasUser,
+  onChangePasswordOpen,
+  onDeleteUserOpen,
+  onResetOpen,
+}: DangerZoneCardProps) {
+  return (
+    <SettingsCard
+      title="Danger Zone"
+      description="Perform potentially destructive actions that cannot be undone"
+      className="lg:bg-red-950/70 border-red-500/20"
+      titleClassName="group-hover/settings-card:from-red-500/10 group-hover/settings-card:to-red-950/20"
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        {hasUser && (
+          <>
+            <Button intent="alert" rounded onClick={onChangePasswordOpen}>
+              Change Password
+            </Button>
+            <Button intent="alert" rounded onClick={onDeleteUserOpen}>
+              Delete User
+            </Button>
+          </>
+        )}
+        <Button intent="alert" rounded onClick={onResetOpen}>
+          Reset Configuration
+        </Button>
+      </div>
+    </SettingsCard>
   );
 }
 
@@ -89,15 +581,26 @@ function Content() {
     setEncryptedPassword,
   } = useUserData();
   const [newPassword, setNewPassword] = React.useState('');
-  const [loading, setLoading] = React.useState(false);
+  const [confirmNewPassword, setConfirmNewPassword] = React.useState('');
+  const [createLoading, setCreateLoading] = React.useState(false);
   const [passwordRequirements, setPasswordRequirements] = React.useState<
     string[]
   >([]);
   const { status } = useStatus();
   const baseUrl = status?.settings?.baseUrl || window.location.origin;
+  const hasStatus = !!status;
+  const searchApiDisabled = status?.settings?.searchApiDisabled ?? false;
+  const seanimeExtensionVersion =
+    status?.settings?.seanimeExtensionVersion ?? null;
+  const isSeanimeVersionUnavailable =
+    hasStatus && !searchApiDisabled && !seanimeExtensionVersion;
+  const disableSeanimeCard = searchApiDisabled || isSeanimeVersionUnavailable;
+  const seanimeDisabledReason = searchApiDisabled
+    ? 'Requires Search API (disabled on this instance)'
+    : isSeanimeVersionUnavailable
+      ? 'Unavailable on this instance. Please ask your instance hoster.'
+      : undefined;
   const importFileRef = React.useRef<HTMLInputElement>(null);
-  const installModal = useDisclosure(false);
-  const passwordModal = useDisclosure(false);
   const deleteUserModal = useDisclosure(false);
   const [confirmDeletionPassword, setConfirmDeletionPassword] =
     React.useState('');
@@ -107,14 +610,14 @@ function Content() {
   const exportMenuModal = useDisclosure(false);
   const importMenuModal = useDisclosure(false);
   const [filterCredentialsInExport, setFilterCredentialsInExport] =
+    React.useState(true);
+  const chillLinkModal = useDisclosure(false);
+  const seanimeModal = useDisclosure(false);
+  const jellyfinModal = useDisclosure(false);
+  const aniyomiModal = useDisclosure(false);
+  const [addonPasswordModalOpen, setAddonPasswordModalOpen] =
     React.useState(false);
-  const [installProtocol, setInstallProtocol] = React.useState('stremio');
-  const [diffData, setDiffData] = React.useState<DiffItem[]>([]);
-  const [remoteConfig, setRemoteConfig] = React.useState<UserData | null>(null);
-  const [remoteDiffConfig, setRemoteDiffConfig] = React.useState<UserData | null>(null);
-  const [localDiffConfig, setLocalDiffConfig] = React.useState<UserData | null>(null);
-  const diffModal = useDisclosure(false);
-  const pendingSkipDiffRef = React.useRef(false);
+  const { handleSave: handleSaveContext, loading: saveLoading } = useSave();
   const confirmResetProps = useConfirmationDialog({
     title: 'Confirm Reset',
     description: `Are you sure you want to reset your configuration? This will clear all your settings${uuid ? ` but keep your user account` : ''}. This action cannot be undone.`,
@@ -133,7 +636,7 @@ function Content() {
     actionText: 'Delete',
     actionIntent: 'alert',
     onConfirm: () => {
-      setLoading(true);
+      setCreateLoading(true);
       handleDelete();
     },
   });
@@ -150,178 +653,39 @@ function Content() {
       requirements.push('Password must be at least 6 characters long');
     }
 
+    if (confirmNewPassword.length > 0 && newPassword !== confirmNewPassword) {
+      requirements.push('Passwords do not match');
+    }
+
     setPasswordRequirements(requirements);
-  }, [newPassword, uuid, password]);
+  }, [newPassword, confirmNewPassword, uuid, password]);
 
-  const handleRevertAll = () => {
-    if (remoteConfig) {
-      setUserData((prev) => {
-        return {
-          ...DefaultUserData,
-          ...remoteConfig,
-          // Preserve user-specific fields that are ignored in diff
-          uuid: prev.uuid,
-          encryptedPassword: prev.encryptedPassword,
-          trusted: prev.trusted,
-          addonPassword: prev.addonPassword,
-          ip: prev.ip,
-          showChanges: prev.showChanges, 
-        };
-      });
-      toast.success('Changes reverted');
-      diffModal.close();
-    }
-  };
-
-  const handleSave = async (
-    e?: React.FormEvent<HTMLFormElement>,
-    authenticated: boolean = false,
-    skipDiffHandler: boolean = false
-  ) => {
+  const handleCreate = async (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
-    const shouldSkipDiff = skipDiffHandler || pendingSkipDiffRef.current;
-    pendingSkipDiffRef.current = false;
-
-    let suppressSuccessToast = false;
-    if (
-      status?.settings.protected &&
-      !authenticated &&
-      !userData.addonPassword
-    ) {
-      pendingSkipDiffRef.current = shouldSkipDiff;
-      passwordModal.open();
-      return;
-    }
     if (passwordRequirements.length > 0) {
       toast.error('Password requirements not met');
       return;
     }
-
-    if (uuid && password && !shouldSkipDiff && userData?.showChanges) {
-      setLoading(true);
-      try {
-        const remoteResult = await UserConfigAPI.loadConfig(uuid, password);
-        
-        if (remoteResult.success && remoteResult.data) {
-          const remoteConf = remoteResult.data.config;
-          const resolveNamesInConfig = (conf: UserData | null, presetsSource: UserData['presets']) => {
-            if (!conf || !conf.groups) return conf;
-            const newConf = { ...conf, groups: { ...conf.groups } };
-            
-            if (newConf.groups.groupings) {
-              newConf.groups.groupings = newConf.groups.groupings.map((g: any) => {
-                if (Array.isArray(g.addons)) {
-                  return {
-                    ...g,
-                    addons: g.addons.map((id: string) => {
-                      const find = (list?: any[]) => list?.find(p => p.instanceId === id || p.options?.id === id);
-                      const item = find(presetsSource);
-                      return item?.options?.name || id;
-                    })
-                  };
-                }
-                return g;
-              });
-            }
-            return newConf;
-          };
-
-          const allPresets = [...(userData?.presets || []), ...(remoteConf?.presets || [])];
-           const filterForDiff = (d: UserData | null) => {
-             if (!d) return d;
-             const filtered: any = { ...d };
-             delete filtered.ip;
-             delete filtered.uuid;
-             delete filtered.addonPassword;
-             delete filtered.trusted;
-             delete filtered.encryptedPassword;
-             delete filtered.showChanges;
-               
-             // Sort keys to ensure deterministic ordering for diffs (fixes ghost diffs)
-             return sortKeys(filtered) as UserData;
-           };
-
-           const filteredRemote = filterForDiff(remoteConf);
-           const filteredLocal = filterForDiff(userData);
-
-           // Resolve IDs to Names for readable diffs (e.g. Group Swaps)
-           const processedRemote = resolveNamesInConfig(filteredRemote, allPresets);
-           const processedLocal = resolveNamesInConfig(filteredLocal, allPresets);
-           const diffs = getObjectDiff(processedRemote, processedLocal);
-          
-          if (diffs.length === 0) {
-            toast.info('No changes detected');
-            suppressSuccessToast = true;
-            setLoading(false);
-          } else {
-            setRemoteConfig(remoteConf);
-            setRemoteDiffConfig(processedRemote);
-            setLocalDiffConfig(processedLocal);
-            setDiffData(diffs);
-            if (authenticated) {
-              passwordModal.close();
-            }
-            diffModal.open();
-            setLoading(false);
-            return;
-          }
-        } else {
-             setLoading(false);
-             toast.warning('Error checking for changes. Proceeding with save.');
-        }
-      } catch (err) {
-        console.error('Error checking for changes:', err);
-        toast.warning('Error checking for changes. Proceeding with save.');
-        // Reset loading state before proceeding to actual save
-        setLoading(false);
-      }
-    }
-
-    setLoading(true);
-
+    setCreateLoading(true);
     try {
-      const result = uuid
-        ? await UserConfigAPI.updateConfig(uuid, userData, password!)
-        : await UserConfigAPI.createConfig(userData, newPassword);
-
-      if (!result.success) {
-        if (result.error?.code === 'USER_INVALID_DETAILS') {
-          toast.error('Your addon password is incorrect');
-          setUserData((prev) => ({
-            ...prev,
-            addonPassword: '',
-          }));
-          passwordModal.open();
-          return;
-        }
-        throw new Error(
-          result.error?.message || 'Failed to save configuration'
-        );
-      }
-
-      if (!uuid && result.data) {
-        toast.success(
-          'Configuration created successfully, your UUID and password are below'
-        );
-        setUuid(result.data.uuid);
-        setEncryptedPassword(result.data.encryptedPassword);
-        setPassword(newPassword);
-      } else if (uuid && result.success && !suppressSuccessToast) {
-        toast.success('Configuration updated successfully');
-      }
-
-      if (authenticated) {
-        passwordModal.close();
-      }
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : 'Failed to save configuration'
+      const result = await createUserConfig(userData, newPassword);
+      toast.success(
+        'Configuration created successfully, your UUID and password are below'
       );
-      if (authenticated) {
-        passwordModal.close();
+      setUuid(result.uuid);
+      setEncryptedPassword((result as CreateUserResponse).encryptedPassword);
+      setPassword(newPassword);
+    } catch (err) {
+      if (err instanceof APIError && err.is('ADDON_PASSWORD_INVALID')) {
+        setUserData((prev) => ({ ...prev, addonPassword: '' }));
+        setAddonPasswordModalOpen(true);
+        return;
       }
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to create configuration'
+      );
     } finally {
-      setLoading(false);
+      setCreateLoading(false);
     }
   };
 
@@ -339,6 +703,8 @@ function Content() {
           );
           return;
         }
+        delete parsed.uuid;
+        delete parsed.trusted;
         setUserData((prev) => ({
           ...prev,
           ...applyMigrations(parsed),
@@ -364,6 +730,8 @@ function Content() {
       tvdbApiKey: undefined,
       rpdbApiKey: undefined,
       topPosterApiKey: undefined,
+      aioratingsApiKey: undefined,
+      aioratingsProfileId: undefined,
       services: clonedData?.services?.map((service) => ({
         ...service,
         credentials: {},
@@ -430,17 +798,41 @@ function Content() {
     : '';
   const encodedManifest = encodeURIComponent(manifestUrl);
 
+  const hasSeanimePersonalUrl =
+    !!uuid && !!encryptedPassword && uuidRegex.test(uuid);
+
+  const seanimePluginUrl = hasSeanimePersonalUrl
+    ? `${baseUrl}/seanime/${uuid}/${encryptedPassword}/extensions/aiostreams-plugin.json`
+    : `${baseUrl}/seanime/extensions/aiostreams-plugin.json`;
+  const seanimeProviderUrl = hasSeanimePersonalUrl
+    ? `${baseUrl}/seanime/${uuid}/${encryptedPassword}/extensions/aiostreams-torrent-provider.json`
+    : `${baseUrl}/seanime/extensions/aiostreams-torrent-provider.json`;
   const copyManifestUrl = async () => {
     await copyToClipboard(manifestUrl, {
-      successMessage: 'Manifest URL copied to clipboard',
-      errorMessage: 'Failed to copy manifest URL',
+      onSuccess: () => toast.success('Manifest URL copied to clipboard'),
+      onError: () => toast.error('Failed to copy manifest URL'),
     });
   };
 
   const copyChillLinkUrl = async () => {
     await copyToClipboard(chillLinkUrl, {
-      successMessage: 'ChillLink URL copied to clipboard',
-      errorMessage: 'Failed to copy ChillLink URL',
+      onSuccess: () => toast.success('ChillLink URL copied to clipboard'),
+      onError: () => toast.error('Failed to copy ChillLink URL'),
+    });
+  };
+
+  const copySeanimePluginUrl = async () => {
+    await copyToClipboard(seanimePluginUrl, {
+      onSuccess: () => toast.success('Plugin URL copied to clipboard'),
+      onError: () => toast.error('Failed to copy URL'),
+    });
+  };
+
+  const copySeanimeProviderUrl = async () => {
+    await copyToClipboard(seanimeProviderUrl, {
+      onSuccess: () =>
+        toast.success('Torrent provider URL copied to clipboard'),
+      onError: () => toast.error('Failed to copy URL'),
     });
   };
 
@@ -451,21 +843,7 @@ function Content() {
         return;
       }
 
-      const result = await UserConfigAPI.deleteUser(
-        uuid,
-        confirmDeletionPassword
-      );
-
-      if (!result.success) {
-        if (result.error?.code === 'USER_INVALID_DETAILS') {
-          toast.error('Invalid password');
-        } else {
-          toast.error(
-            result.error?.message || 'Failed to delete configuration'
-          );
-        }
-        return;
-      }
+      await deleteUserConfig(uuid, confirmDeletionPassword);
 
       // Only clear data after successful deletion
       toast.success('Configuration deleted successfully');
@@ -480,50 +858,66 @@ function Content() {
         err instanceof Error ? err.message : 'Failed to delete configuration'
       );
     } finally {
-      setLoading(false);
+      setCreateLoading(false);
     }
   };
 
-  const resolveId = React.useCallback((v: string) => {
-    const findAddon = (presets?: UserData['presets']) => presets?.find(p => {
-      if (p.instanceId === v) return true;
-      const opts = p.options as Record<string, any>;
-      return opts?.id === v;
-    });
+  const changePasswordModal = useDisclosure(false);
+  const [changePasswordLoading, setChangePasswordLoading] =
+    React.useState(false);
+  const [changePasswordData, setChangePasswordData] = React.useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmNewPassword: '',
+  });
 
-    const addon = findAddon(userData?.presets) || findAddon(remoteConfig?.presets);
-
-    if (addon) {
-      const opts = addon.options as Record<string, any>;
-      if (opts?.name && typeof opts.name === 'string') return opts.name;
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uuid) {
+      toast.error('No UUID found');
+      return;
     }
-    return v;
-  }, [userData?.presets, remoteConfig?.presets]);
-
-  const valueFormatter = React.useCallback((val: any): string => {
-    const resolveDeep = (v: any): any => {
-      // Swap IDs for names
-      if (typeof v === 'string') return resolveId(v);
-      if (Array.isArray(v)) return v.map(resolveDeep);
-      if (v && typeof v === 'object') {
-        return Object.fromEntries(
-          Object.entries(v).map(([k, val]) => [k, resolveDeep(val)])
-        );
-      }
-      return v;
-    };
-
-    const resolved = resolveDeep(val);
-
-    if (typeof resolved === 'object' && resolved !== null) {
-      try {
-        return JSON.stringify(resolved, null, 2);
-      } catch {
-        return '[Circular Reference]';
-      }
+    if (changePasswordData.newPassword.length < 6) {
+      toast.error('New password must be at least 6 characters long');
+      return;
     }
-    return String(resolved);
-  }, [resolveId]);
+    if (
+      changePasswordData.newPassword !== changePasswordData.confirmNewPassword
+    ) {
+      toast.error('New passwords do not match');
+      return;
+    }
+    if (changePasswordData.newPassword === changePasswordData.currentPassword) {
+      toast.error('New password cannot be the same as current password');
+      return;
+    }
+    setChangePasswordLoading(true);
+    try {
+      const result = await changePassword(
+        uuid,
+        changePasswordData.currentPassword,
+        changePasswordData.newPassword
+      );
+
+      toast.success(
+        'Password changed successfully. Please reinstall AIOStreams.'
+      );
+      setPassword(changePasswordData.newPassword);
+      setEncryptedPassword(result.encryptedPassword);
+      changePasswordModal.close();
+      setChangePasswordData({
+        currentPassword: '',
+        newPassword: '',
+        confirmNewPassword: '',
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to change password'
+      );
+    } finally {
+      setChangePasswordLoading(false);
+    }
+  };
 
   return (
     <>
@@ -541,287 +935,149 @@ function Content() {
 
       <div className="space-y-4 mt-6">
         {!uuid ? (
-          <SettingsCard
-            title="Create Configuration"
-            description="Set up your personalised addon configuration"
-          >
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                {passwordRequirements.length > 0 && newPassword?.length > 0 && (
-                  <Alert
-                    intent="alert"
-                    title="Password Requirements"
-                    description={
-                      <ul className="list-disc list-inside">
-                        {passwordRequirements.map((requirement) => (
-                          <li key={requirement}>{requirement}</li>
-                        ))}
-                      </ul>
-                    }
-                  />
-                )}
-                <PasswordInput
-                  label="Password"
-                  id="password"
-                  value={newPassword}
-                  onValueChange={(value) => setNewPassword(value)}
-                  placeholder="Enter a password to protect your configuration"
-                  required
-                  autoComplete="new-password"
-                />
-                <p className="text-sm text-[--muted] mt-1">
-                  This is the password you will use to access and update your
-                  configuration later. You cannot change this or reset the
-                  password once set, so please choose wisely, and remember it.
-                </p>
-              </div>
-              <Button intent="white" type="submit" loading={loading} rounded>
-                Create
-              </Button>
-            </form>
-          </SettingsCard>
+          <CreateConfigCard
+            onSubmit={handleCreate}
+            passwordRequirements={passwordRequirements}
+            newPassword={newPassword}
+            confirmNewPassword={confirmNewPassword}
+            onNewPasswordChange={setNewPassword}
+            onConfirmNewPasswordChange={setConfirmNewPassword}
+            createLoading={createLoading}
+          />
         ) : (
           <>
-            <SettingsCard
-              title="Save Configuration"
-              description="Save your configuration to your account by clicking Update below."
-            >
-              <div className="flex items-start gap-1">
-                <Alert
-                  intent="info"
-                  isClosable={false}
-                  description={
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-md text-[--primary]">
-                          Your UUID: <span className="font-bold">{uuid}</span>
-                        </span>
-                        <BiCopy
-                          className="min-h-5 min-w-5 cursor-pointer"
-                          onClick={() =>
-                            copyToClipboard(uuid, {
-                              successMessage: 'UUID copied to clipboard',
-                            })
-                          }
-                        />
-                      </div>
-                      <p className="text-sm text-[--muted]">
-                        Save your UUID and password - you'll need them to update
-                        your configuration later
-                      </p>
-                    </div>
-                  }
-                  className="flex-1"
-                />
-              </div>
-              <form onSubmit={handleSave}>
-                <div className="flex items-center justify-between gap-4 mt-4">
-                  <Button type="submit" intent="white" loading={loading} rounded>
-                    Save
-                  </Button>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="show-changes"
-                      label="Show changes before saving"
-                      value={userData?.showChanges ?? false}
-                      onValueChange={(val) =>
-                        setUserData((prev) => ({ ...prev, showChanges: val }))
-                      }
-                    />
-                  </div>
-                </div>
-              </form>
-            </SettingsCard>
+            <SaveConfigCard
+              uuid={uuid}
+              onCopyUuid={() =>
+                copyToClipboard(uuid, {
+                  onSuccess: () => toast.success('UUID copied to clipboard'),
+                  onError: () => toast.error('Failed to copy UUID'),
+                })
+              }
+              onSave={(e) => {
+                e.preventDefault();
+                handleSaveContext();
+              }}
+              saveLoading={saveLoading}
+              showChanges={userData?.showChanges ?? false}
+              onShowChangesChange={(val) =>
+                setUserData((prev) => ({ ...prev, showChanges: val }))
+              }
+            />
 
-            {/* <SettingsCard
-              title="Install"
-              description="Choose how you want to install your personalized addon. There is no need to reinstall the addon after updating your configuration above, unless you've updated your upstream addons."
-            >
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  onClick={() =>
-                    window.open(
-                      `stremio://${baseUrl.replace(/^https?:\/\//, '')}/stremio/${uuid}/${encryptedPassword}/manifest.json`
-                    )
-                  }
-                >
-                  Stremio Desktop
-                </Button>
-                <Button
-                  onClick={() =>
-                    window.open(
-                      `https://web.stremio.com/#/addons?addon=${encodedManifest}`
-                    )
-                  }
-                >
-                  Stremio Web
-                </Button>
-                <Button onClick={copyManifestUrl}>Copy URL</Button>
-              </div>
-            </SettingsCard> */}
-
-            <SettingsCard
-              title="Install"
-              description="Install your addon using your preferred method. There usually isn't a need to reinstall the addon after updating your configuration above, unless you use catalogs and you've changed the order of them or the addons that provide them"
-            >
-              <div className="flex justify-between items-center">
-                <Button intent="white" rounded onClick={installModal.open}>
-                  Install
-                </Button>
-                <div className="w-40">
-                  <Select
-                    options={[
-                      { label: 'Stremio', value: 'stremio' },
-                      { label: 'ChillLink', value: 'chilllink' },
-                    ]}
-                    value={installProtocol}
-                    onValueChange={setInstallProtocol}
-                  />
-                </div>
-              </div>
-
-              <Modal
-                open={installModal.isOpen}
-                onOpenChange={installModal.toggle}
-                title={`Install to ${installProtocol === 'stremio' ? 'Stremio' : 'Chillio'}`}
-                description="Install your addon"
-              >
-                <div className="flex flex-col gap-4">
-                  {installProtocol === 'stremio' && (
-                    <>
-                      <Button
-                        onClick={() =>
-                          window.open(
-                            `stremio://${baseUrl.replace(/^https?:\/\//, '')}/stremio/${uuid}/${encryptedPassword}/manifest.json`
-                          )
-                        }
-                        intent="primary"
-                        className="w-full"
-                      >
-                        Stremio
-                      </Button>
-                      <Button
-                        onClick={() =>
-                          window.open(
-                            `https://web.stremio.com/#/addons?addon=${encodedManifest}`
-                          )
-                        }
-                        intent="primary"
-                        className="w-full"
-                      >
-                        Stremio Web
-                      </Button>
-                    </>
-                  )}
-
-                  <div className="flex items-center gap-2 mt-2">
-                    <TextInput
-                      type="text"
-                      readOnly
-                      value={
-                        installProtocol === 'stremio'
-                          ? manifestUrl
-                          : chillLinkUrl
-                      }
-                      className="flex-1 rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-400"
-                      onClick={(e) => e.currentTarget.select()}
-                    />
-                    <Button
-                      onClick={
-                        installProtocol === 'stremio'
-                          ? copyManifestUrl
-                          : copyChillLinkUrl
-                      }
-                      intent="primary"
-                      className="shrink-0 px-3"
-                      aria-label="Copy URL"
-                    >
-                      <CopyIcon className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Modal>
-            </SettingsCard>
+            <InstallCard
+              baseUrl={baseUrl}
+              uuid={uuid}
+              encryptedPassword={encryptedPassword ?? ''}
+              encodedManifest={encodedManifest}
+              manifestUrl={manifestUrl}
+              onCopyManifestUrl={copyManifestUrl}
+              onOpenChillio={chillLinkModal.open}
+              onOpenSeanime={seanimeModal.open}
+              onOpenJellyfin={jellyfinModal.open}
+              onOpenAniyomi={aniyomiModal.open}
+              disableSeanimeCard={disableSeanimeCard}
+              seanimeDisabledReason={seanimeDisabledReason}
+            />
           </>
         )}
 
+        <BackupCard
+          onExportOpen={exportMenuModal.open}
+          onImportOpen={importMenuModal.open}
+          onImport={handleImport}
+          importFileRef={importFileRef}
+        />
+
+        <DangerZoneCard
+          hasUser={!!uuid}
+          onChangePasswordOpen={changePasswordModal.open}
+          onDeleteUserOpen={deleteUserModal.open}
+          onResetOpen={confirmResetProps.open}
+        />
+
         <Modal
-          open={passwordModal.isOpen}
-          onOpenChange={passwordModal.toggle}
-          title="Addon Password"
-          description="This instance is protected with a password. You must enter the password for this instance (NOT your user password you set earlier) to create a configuration here."
+          open={changePasswordModal.isOpen}
+          onOpenChange={(open) => {
+            if (changePasswordLoading) return;
+            changePasswordModal.toggle();
+            if (!open) {
+              setChangePasswordData({
+                currentPassword: '',
+                newPassword: '',
+                confirmNewPassword: '',
+              });
+            }
+          }}
+          title="Change Password"
+          description={
+            <Alert
+              intent="warning"
+              description="Changing your password will invalidate ALL existing installations. You will need to re-install AIOStreams after this change."
+            />
+          }
         >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSave(e, true);
-            }}
-          >
+          <form onSubmit={handleChangePassword} className="space-y-4">
             <PasswordInput
-              label="Addon Password"
-              value={userData.addonPassword}
+              id="change-current-password"
+              label="Current Password"
+              value={changePasswordData.currentPassword}
               required
-              placeholder="Enter the password for this instance"
+              placeholder="Enter your current password"
               onValueChange={(value) =>
-                setUserData((prev) => ({
+                setChangePasswordData((prev) => ({
                   ...prev,
-                  addonPassword: value,
+                  currentPassword: value,
                 }))
               }
             />
-            <Button type="submit" intent="white" loading={loading} rounded>
-              Save
-            </Button>
+            <PasswordInput
+              id="change-new-password"
+              label="New Password"
+              value={changePasswordData.newPassword}
+              required
+              placeholder="Enter your new password"
+              onValueChange={(value) =>
+                setChangePasswordData((prev) => ({
+                  ...prev,
+                  newPassword: value,
+                }))
+              }
+            />
+            <PasswordInput
+              id="change-confirm-new-password"
+              label="Confirm New Password"
+              value={changePasswordData.confirmNewPassword}
+              required
+              placeholder="Re-enter your new password"
+              onValueChange={(value) =>
+                setChangePasswordData((prev) => ({
+                  ...prev,
+                  confirmNewPassword: value,
+                }))
+              }
+            />
+            <div className="pt-2 flex justify-end gap-3">
+              <Button
+                type="button"
+                intent="gray-outline"
+                onClick={() => {
+                  if (!changePasswordLoading) changePasswordModal.close();
+                }}
+                disabled={changePasswordLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                intent="alert"
+                loading={changePasswordLoading}
+              >
+                Change Password
+              </Button>
+            </div>
           </form>
         </Modal>
-
-        <SettingsCard
-          title="Backups"
-          description="Export your settings or restore from a backup file"
-        >
-          <div className="flex flex-wrap gap-3">
-            <Button
-              onClick={exportMenuModal.open}
-              leftIcon={<UploadIcon />}
-              intent="gray"
-            >
-              Export
-            </Button>
-            <input
-              type="file"
-              accept=".json"
-              className="hidden"
-              id="import-file"
-              onChange={handleImport}
-              ref={importFileRef}
-            />
-            <Button
-              onClick={importMenuModal.open}
-              leftIcon={<DownloadIcon />}
-              intent="gray"
-            >
-              Import
-            </Button>
-          </div>
-        </SettingsCard>
-
-        <SettingsCard
-          title="Danger Zone"
-          description="Perform potentially destructive actions that cannot be undone"
-          className="lg:bg-red-950/70 border-red-500/20"
-          titleClassName="group-hover/settings-card:from-red-500/10 group-hover/settings-card:to-red-950/20"
-        >
-          <div className="flex items-center gap-3">
-            {uuid && (
-              <Button intent="alert" rounded onClick={deleteUserModal.open}>
-                Delete User
-              </Button>
-            )}
-            <Button intent="alert" rounded onClick={confirmResetProps.open}>
-              Reset Configuration
-            </Button>
-          </div>
-        </SettingsCard>
 
         <Modal
           open={deleteUserModal.isOpen}
@@ -865,7 +1121,7 @@ function Content() {
                   <Button
                     type="submit"
                     intent="alert"
-                    loading={loading}
+                    loading={createLoading}
                     className="w-full"
                   >
                     Delete
@@ -875,8 +1131,213 @@ function Content() {
             </div>
           </form>
         </Modal>
+        {/* ChillLink modal */}
+        <Modal
+          open={chillLinkModal.isOpen}
+          onOpenChange={chillLinkModal.toggle}
+          title="Install in Chillio"
+          description="Add your AIOStreams addon via the ChillLink protocol"
+        >
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-2">
+              <TextInput
+                type="text"
+                readOnly
+                value={chillLinkUrl}
+                className="flex-1"
+                onClick={(e) => e.currentTarget.select()}
+              />
+              <Button
+                onClick={copyChillLinkUrl}
+                intent="primary"
+                className="shrink-0 px-3"
+                aria-label="Copy ChillLink URL"
+              >
+                <CopyIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Seanime modal */}
+        <Modal
+          open={seanimeModal.isOpen}
+          onOpenChange={seanimeModal.toggle}
+          title="Install in Seanime"
+          description="Stream AIOStreams content directly within Seanime"
+        >
+          <div className="flex flex-col gap-5">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-gray-400">
+                Seanime integration is in{' '}
+                <span className="font-medium text-amber-300">beta</span>
+              </span>
+              <span className="text-gray-400">
+                Extension version:{' '}
+                <span className="font-medium text-gray-200">
+                  {seanimeExtensionVersion
+                    ? `v${seanimeExtensionVersion}`
+                    : 'Unavailable'}
+                </span>
+              </span>
+            </div>
+
+            <p className="text-xs text-gray-400">
+              In Seanime, go to{' '}
+              <span className="text-gray-200">
+                Extensions → Add Extensions → Install from URL
+              </span>
+              . Install one of the two extensions below — choose based on how
+              you use AIOStreams.
+            </p>
+
+            {/* Plugin option */}
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-medium text-white">
+                  AIOStreams Plugin{' '}
+                  <span className="text-xs text-gray-500 font-normal">
+                    — recommended for most
+                  </span>
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Best for debrid, usenet, or any URL-based streams. Adds a
+                  dedicated results panel to Seanime.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <TextInput
+                  type="text"
+                  readOnly
+                  value={seanimePluginUrl}
+                  className="flex-1"
+                  onClick={(e) => e.currentTarget.select()}
+                />
+                <Button
+                  onClick={copySeanimePluginUrl}
+                  intent="primary"
+                  className="shrink-0 px-3"
+                  aria-label="Copy plugin URL"
+                >
+                  <CopyIcon className="h-4 w-4" />
+                </Button>
+              </div>
+              {!hasSeanimePersonalUrl && (
+                <p className="text-xs text-gray-500">
+                  After installing, open the extension settings and enter your
+                  Manifest URL.
+                </p>
+              )}
+            </div>
+
+            <div className="border-t border-gray-700/60" />
+
+            {/* Torrent provider option */}
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-medium text-white">
+                  AIOStreams Torrent Provider
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  For native torrent integration. Best if you only use P2P or
+                  want Seanime to handle debrid itself.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <TextInput
+                  type="text"
+                  readOnly
+                  value={seanimeProviderUrl}
+                  className="flex-1"
+                  onClick={(e) => e.currentTarget.select()}
+                />
+                <Button
+                  onClick={copySeanimeProviderUrl}
+                  intent="primary"
+                  className="shrink-0 px-3"
+                  aria-label="Copy torrent provider URL"
+                >
+                  <CopyIcon className="h-4 w-4" />
+                </Button>
+              </div>
+              {!hasSeanimePersonalUrl && (
+                <p className="text-xs text-gray-500">
+                  After installing, open the extension settings and enter your
+                  Manifest URL.
+                </p>
+              )}
+            </div>
+          </div>
+        </Modal>
+
+        <Modal
+          open={jellyfinModal.isOpen}
+          onOpenChange={jellyfinModal.toggle}
+          title="AIOStreams for Jellyfin"
+          description="Install the Gelato plugin to bring AIOStreams to Jellyfin"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-300">
+              Gelato is an unofficial Jellyfin plugin that brings Stremio addons
+              into Jellyfin.
+            </p>
+            <Button
+              intent="primary"
+              className="w-full"
+              leftIcon={<FiExternalLink />}
+              onClick={() =>
+                window.open('https://github.com/lostb1t/Gelato', '_blank')
+              }
+            >
+              Open Gelato on GitHub
+            </Button>
+          </div>
+        </Modal>
+
+        <Modal
+          open={aniyomiModal.isOpen}
+          onOpenChange={aniyomiModal.toggle}
+          title="AIOStreams for Aniyomi / Animiru"
+          description="Install the extension to use AIOStreams in Aniyomi and Animiru"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-300">
+              This unofficial extension brings AIOStreams support to Aniyomi and
+              forks (e.g. Animiru).
+            </p>
+            <Button
+              intent="primary"
+              className="w-full"
+              leftIcon={<FiExternalLink />}
+              onClick={() =>
+                window.open(
+                  'https://github.com/worldInColors/aiostreams-extension',
+                  '_blank'
+                )
+              }
+            >
+              Open extension on GitHub
+            </Button>
+          </div>
+        </Modal>
+
         <ConfirmationDialog {...confirmDelete} />
         <ConfirmationDialog {...confirmResetProps} />
+
+        <AddonPasswordModal
+          open={addonPasswordModalOpen}
+          onOpenChange={setAddonPasswordModalOpen}
+          loading={createLoading}
+          onSubmit={() => {
+            setAddonPasswordModalOpen(false);
+            handleCreate();
+          }}
+          submitText="Create"
+          value={userData.addonPassword ?? ''}
+          onValueChange={(value) =>
+            setUserData((prev) => ({ ...prev, addonPassword: value }))
+          }
+        />
 
         <Modal
           open={exportMenuModal.isOpen}
@@ -885,22 +1346,6 @@ function Content() {
           description="Choose how to export your configuration"
         >
           <div className="space-y-4">
-            {/* Exclude Credentials Option */}
-            <div className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
-              <div className="flex-1">
-                <div className="text-sm font-medium text-white">
-                  Exclude Credentials
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  Remove sensitive information from export
-                </div>
-              </div>
-              <Switch
-                value={filterCredentialsInExport}
-                onValueChange={setFilterCredentialsInExport}
-              />
-            </div>
-
             <div className="grid grid-cols-2 gap-4">
               <ModalOptionButton
                 onClick={handleExport}
@@ -916,6 +1361,28 @@ function Content() {
                 icon={<PlusIcon className="h-8 w-8" />}
                 title="Export as Template"
                 description="Create reusable template with custom metadata"
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 mt-6 p-3 bg-gray-800/50 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-white">
+                    Exclude Credentials
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    Remove sensitive API keys and passwords from the export
+                  </div>
+                </div>
+                <Switch
+                  value={filterCredentialsInExport}
+                  onValueChange={setFilterCredentialsInExport}
+                />
+              </div>
+              <Alert
+                intent="warning"
+                isClosable={false}
+                description="While excluding credentials removes your API keys, any custom addon URLs or manually overridden URLs in your config are not removed. These may contain sensitive information - double-check before sharing."
               />
             </div>
           </div>
@@ -960,50 +1427,6 @@ function Content() {
           onOpenChange={templatesModal.toggle}
           openImportModal
         />
-
-        <Modal
-          open={diffModal.isOpen}
-          onOpenChange={diffModal.toggle}
-          title="Confirm Changes"
-          description="Review the changes you are about to make to your configuration."
-        >
-          <div className="space-y-4">
-            <DiffViewer
-              diffs={diffData}
-              valueFormatter={valueFormatter}
-              oldValue={remoteDiffConfig}
-              newValue={localDiffConfig}
-            />
-            <div className="flex justify-between pt-4">
-              <Button
-                intent="alert"
-                onClick={handleRevertAll}
-                disabled={loading}
-              >
-                Reset Changes
-              </Button>
-              <div className="flex gap-3">
-                <Button
-                  intent="gray-outline"
-                  onClick={diffModal.close}
-                  disabled={loading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  intent="white"
-                  onClick={() => {
-                    diffModal.close();
-                    handleSave(undefined, undefined, true);
-                  }}
-                  loading={loading}
-                >
-                  Confirm & Save
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Modal>
       </div>
     </>
   );

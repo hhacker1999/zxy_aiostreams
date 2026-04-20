@@ -38,6 +38,7 @@ export class NewznabPreset extends BuiltinAddonPreset {
       constants.NZBDAV_SERVICE,
       constants.ALTMOUNT_SERVICE,
       constants.STREMIO_NNTP_SERVICE,
+      constants.STREMTHRU_NEWZ_SERVICE,
     ] as ServiceId[];
     const options: Option[] = [
       {
@@ -67,6 +68,7 @@ export class NewznabPreset extends BuiltinAddonPreset {
           { label: 'Nzb.life', value: 'https://api.nzb.life/' },
           { label: 'NZBFinder', value: 'https://nzbfinder.ws/' },
           { label: 'NZBgeek', value: 'https://api.nzbgeek.info/' },
+          { label: 'NzbNoob', value: 'https://nzbnoob.com' },
           { label: 'NzbPlanet', value: 'https://api.nzbplanet.net' },
           { label: 'NZBStars', value: 'https://nzbstars.com/' },
           { label: 'SceneNZBs', value: 'https://scenenzbs.com' },
@@ -187,15 +189,6 @@ export class NewznabPreset extends BuiltinAddonPreset {
           'Newznab endpoints can limit the number of results returned per request. Enabling this option will make the addon paginate through all available results to provide a more comprehensive set of results. Enabling this can increase the time taken to return results, some endpoints may not support pagination, and this will also increase the number of requests.',
         type: 'boolean',
         default: false,
-        showInSimpleMode: false,
-      },
-      {
-        id: 'checkOwned',
-        name: 'Check Owned NZBs',
-        description:
-          'When searching for NZBs, check if the NZB is already owned (in your library) and mark it as such if so. Note: only applies to nzbDAV/Altmount.',
-        type: 'boolean',
-        default: true,
         showInSimpleMode: false,
       },
       {
@@ -367,7 +360,6 @@ export class NewznabPreset extends BuiltinAddonPreset {
       formatPassthrough:
         options.formatPassthrough ?? options.streamPassthrough ?? false,
       resultPassthrough: options.resultPassthrough ?? false,
-      forceToTop: options.forceToTop ?? false,
       headers: {
         'User-Agent': this.METADATA.USER_AGENT,
       },
@@ -419,7 +411,6 @@ export class NewznabPreset extends BuiltinAddonPreset {
     }
     const config: Record<string, any> = {
       ...this.getBaseConfig(userData, services),
-      checkOwned: options.checkOwned ?? true,
       url: options.newznabUrl,
       apiPath: options.apiPath,
       apiKey: options.apiKey,

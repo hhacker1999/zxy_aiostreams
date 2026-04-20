@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { ParsedId } from '../../../utils/id-parser.js';
-import { Env, getTimeTakenSincePoint } from '../../../utils/index.js';
+import {
+  Env,
+  getTimeTakenSincePoint,
+  normaliseLanguage,
+  normaliseParsedMediaInfo,
+  ParsedMediaInfo,
+} from '../../../utils/index.js';
 import { Logger } from 'winston';
 import {
   BaseDebridAddon,
@@ -13,7 +19,43 @@ import {
   SearchResponse,
   SearchResultItem,
 } from './api.js';
-import { createQueryLimit, useAllTitles } from '../../utils/general.js';
+import {
+  createQueryLimit,
+  getTitleLanguagesForUrl,
+} from '../../utils/general.js';
+
+/**
+ * Parse a comma-separated language string from a newznab/torznab attribute
+ * into an array of canonical AIOStreams language names.
+ */
+export function parseNabLanguages(
+  value: string | number | boolean | undefined
+): string[] {
+  if (typeof value !== 'string' || !value) return [];
+
+  const seen = new Set<string>();
+  return value
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .map((v) => normaliseLanguage(v))
+    .filter((v): v is string => !!v)
+    .filter((v) => {
+      if (seen.has(v)) return false;
+      seen.add(v);
+      return true;
+    });
+}
+
+export function parseNabParsedFileInfo(args: {
+  audioLanguages?: string | number | boolean;
+  subtitleLanguages?: string | number | boolean;
+}): ParsedMediaInfo | undefined {
+  return normaliseParsedMediaInfo({
+    languages: parseNabLanguages(args.audioLanguages),
+    subtitles: parseNabLanguages(args.subtitleLanguages),
+  });
+}
 
 export const NabAddonConfigSchema = BaseDebridConfigSchema.extend({
   url: z.string(),
@@ -21,7 +63,7 @@ export const NabAddonConfigSchema = BaseDebridConfigSchema.extend({
   apiPath: z.string().optional(),
   forceQuerySearch: z.boolean().default(false),
   paginate: z.boolean().default(false),
-  forceInitialLimit: z.number().optional(),
+  forceInitialLimit: z.number().min(1).max(10000).optional(),
 });
 export type NabAddonConfig = z.infer<typeof NabAddonConfigSchema>;
 
@@ -147,7 +189,7 @@ export abstract class BaseNabAddon<
         )
           ? false
           : !queryParams.season && !queryParams.ep,
-        useAllTitles: useAllTitles(this.userData.url),
+        titleLanguages: getTitleLanguagesForUrl(this.userData.url, this.id),
       });
       searchType = 'query';
     }

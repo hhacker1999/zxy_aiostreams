@@ -104,6 +104,10 @@ const createTorznabItemSchema = () =>
         .transform((arr) =>
           arr?.[0] ? { name: arr[0]._, id: arr[0].$.id } : undefined
         ),
+      type: z
+        .array(z.string()) // usually "public", "semi-private" or "private" in Jackett responses
+        .optional()
+        .transform((arr) => arr?.[0]),
       size: z
         .array(z.string())
         .optional()
@@ -123,7 +127,18 @@ const createTorznabItemSchema = () =>
         .array(AttributeSchema)
         .optional()
         .transform(
-          (arr) => arr?.reduce((acc, attr) => ({ ...acc, ...attr }), {}) ?? {}
+          (arr) =>
+            arr?.reduce((acc, attr) => {
+              for (const key in attr) {
+                acc[key] =
+                  acc[key] &&
+                  typeof acc[key] === 'string' &&
+                  typeof attr[key] === 'string'
+                    ? acc[key] + ',' + attr[key]
+                    : attr[key];
+              }
+              return acc;
+            }, {}) ?? {}
         ),
     })
     .transform((item) => ({
@@ -132,6 +147,7 @@ const createTorznabItemSchema = () =>
       guid: item.guid,
       pubDate: item.pubDate,
       jackettindexer: item.jackettindexer,
+      type: item.type,
       size: item.size,
       enclosure: item.enclosure,
       torznab: item['torznab:attr'],
@@ -377,7 +393,6 @@ export class BaseNabApi<N extends 'torznab' | 'newznab'> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/xml',
       Accept: 'application/rss+xml, text/rss+xml, application/xml, text/xml',
-      'Accept-Encoding': 'gzip, br',
       'User-Agent': this.userAgent,
     };
     return headers;

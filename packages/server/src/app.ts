@@ -5,8 +5,7 @@ import {
   statusApi,
   formatApi,
   catalogApi,
-  rpdbApi,
-  topPosterApi,
+  postersApi,
   gdriveApi,
   debridApi,
   searchApi,
@@ -14,6 +13,7 @@ import {
   proxyApi,
   templatesApi,
   zxyApi,
+  syncApi,
 } from './routes/api/index.js';
 import {
   configure,
@@ -29,6 +29,7 @@ import {
   manifest as chillLinkManifest,
   streams as chillLinkStreams,
 } from './routes/chilllink/index.js';
+import seanimeExtensionsRouter from './routes/seanime/extensions.js';
 import {
   gdrive,
   torboxSearch,
@@ -36,9 +37,11 @@ import {
   newznab,
   prowlarr,
   knaben,
+  eztv,
   torrentGalaxy,
   seadex,
   easynews,
+  library,
 } from './routes/builtins/index.js';
 import {
   ipMiddleware,
@@ -73,6 +76,7 @@ export enum StaticFiles {
   UNAUTHORIZED = '401.mp4',
   NO_MATCHING_FILE = 'no_matching_file.mp4',
   PAYMENT_REQUIRED = 'payment_required.mp4',
+  OK = '200.mp4',
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -99,8 +103,7 @@ apiRouter.use('/health', healthApi);
 apiRouter.use('/status', statusApi);
 apiRouter.use('/format', formatApi);
 apiRouter.use('/catalogs', catalogApi);
-apiRouter.use('/rpdb', rpdbApi);
-apiRouter.use('/top-poster', topPosterApi);
+apiRouter.use('/posters', postersApi);
 apiRouter.use('/oauth/exchange/gdrive', gdriveApi);
 apiRouter.use('/debrid', debridApi);
 if (Env.ENABLE_SEARCH_API) {
@@ -109,6 +112,7 @@ if (Env.ENABLE_SEARCH_API) {
 apiRouter.use('/anime', animeApi);
 apiRouter.use('/proxy', proxyApi);
 apiRouter.use('/templates', templatesApi);
+apiRouter.use('/sync', syncApi);
 app.use(`/api/v${constants.API_VERSION}`, apiRouter);
 
 // ZXY Routes
@@ -157,6 +161,12 @@ chillLinkRouter.use('/streams', chillLinkStreams);
 
 app.use('/chilllink/:uuid/:encryptedPassword', chillLinkRouter);
 
+const seanimeRouter = express.Router({ mergeParams: true });
+seanimeRouter.use(corsMiddleware);
+seanimeRouter.use(seanimeExtensionsRouter);
+
+app.use('/seanime', seanimeRouter);
+
 const builtinsRouter = express.Router();
 builtinsRouter.use(internalMiddleware);
 builtinsRouter.use('/gdrive', gdrive);
@@ -165,9 +175,11 @@ builtinsRouter.use('/torznab', torznab);
 builtinsRouter.use('/newznab', newznab);
 builtinsRouter.use('/prowlarr', prowlarr);
 builtinsRouter.use('/knaben', knaben);
+builtinsRouter.use('/eztv', eztv);
 builtinsRouter.use('/torrent-galaxy', torrentGalaxy);
 builtinsRouter.use('/seadex', seadex);
 builtinsRouter.use('/easynews', easynews);
+builtinsRouter.use('/library', library);
 app.use('/builtins', builtinsRouter);
 
 app.get('/logo.png', staticRateLimiter, (req, res, next) => {
