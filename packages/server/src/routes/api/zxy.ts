@@ -46,7 +46,7 @@ router.post(
         : (req.headers['user-agent']?.includes('AIOStreams/') ?? false);
 
     try {
-      const { type, id } = req.params;
+      const { type, id } = req.params as { type: string; id: string };
 
       const aiostreams = await new AIOStreams(req.userData).initialise();
 
