@@ -52,21 +52,28 @@ router.post(
 
       const disableAutoplay = await aiostreams.shouldStopAutoPlay(type, id);
 
-      const response = await aiostreams.getStreams(id, type);
+      const streamResponsePromise = aiostreams.getStreams(id, type);
+      const subtitleResponsePromise = aiostreams.getSubtitles(id, type);
+      const response = await Promise.all([streamResponsePromise, subtitleResponsePromise])
       const streamContext = aiostreams.getStreamContext();
 
       if (!streamContext) {
         throw new Error('Stream context not available');
       }
 
+      const responseObject = {
+        streams: (await transformer.transformStreams(
+          response[0],
+          streamContext.toFormatterContext(response[0].data.streams),
+          { provideStreamData, disableAutoplay }
+        )).streams,
+        subtitles: transformer.transformSubtitles(response[1]).subtitles,
+      }
+
       res
         .status(200)
         .json(
-          await transformer.transformStreams(
-            response,
-            streamContext.toFormatterContext(response.data.streams),
-            { provideStreamData, disableAutoplay }
-          )
+          responseObject,
         );
     } catch (error) {
       let errorMessage =
