@@ -53,7 +53,7 @@ router.post(
       const disableAutoplay = await aiostreams.shouldStopAutoPlay(type, id);
 
       const streamResponsePromise = aiostreams.getStreams(id, type);
-      const subtitleResponsePromise = aiostreams.getSubtitles(id, type);
+      const subtitleResponsePromise = aiostreams.getSubtitles(type, id);
       const response = await Promise.all([streamResponsePromise, subtitleResponsePromise])
       const streamContext = aiostreams.getStreamContext();
 
