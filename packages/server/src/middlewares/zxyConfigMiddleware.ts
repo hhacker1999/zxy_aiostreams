@@ -82,6 +82,21 @@ export const zxyConfigMiddleware = async (
         }
       })
     }
+    const subtitle = req.body.subtitle?.toString() ?? ""
+    if (subtitle === "") {
+      userData.presets.forEach((preset, _) => {
+        if (preset.type === "opensubtitles-v3-plus") {
+          preset.enabled = false
+        }
+      })
+    } else {
+      userData.presets.forEach((preset, _) => {
+        if (preset.type === "opensubtitles-v3-plus") {
+          preset.options.language = [subtitle]
+        }
+      })
+    }
+
 
 
     userData.encryptedPassword = encrypedPassword;

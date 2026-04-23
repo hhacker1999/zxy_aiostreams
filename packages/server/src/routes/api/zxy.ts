@@ -47,7 +47,6 @@ router.post(
 
     try {
       const { type, id } = req.params as { type: string; id: string };
-
       const aiostreams = await new AIOStreams(req.userData).initialise();
 
       const disableAutoplay = await aiostreams.shouldStopAutoPlay(type, id);
