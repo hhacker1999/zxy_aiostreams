@@ -36,14 +36,5 @@
   },
   "engines": {
     "node": ">=24.0.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "bcrypt",
-      "esbuild",
-      "sharp",
-      "sqlite3",
-      "unrs-resolver"
-    ]
   }
 }
